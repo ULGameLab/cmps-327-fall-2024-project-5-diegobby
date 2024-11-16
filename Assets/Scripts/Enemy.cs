@@ -5,11 +5,11 @@ using UnityEngine;
 // FSM States for the enemy
 public enum EnemyState { STATIC, CHASE, REST, MOVING, DEFAULT };
 
-public enum EnemyBehavior {EnemyBehavior1, EnemyBehavior2, EnemyBehavior3 };
+public enum EnemyBehavior { EnemyBehavior1, EnemyBehavior2, EnemyBehavior3 };
 
 public class Enemy : MonoBehaviour
 {
-    //pathfinding
+    // Pathfinding
     protected PathFinder pathFinder;
     public GenerateMap mapGenerator;
     protected Queue<Tile> path;
@@ -19,16 +19,16 @@ public class Enemy : MonoBehaviour
     protected Tile targetTile;
     public Vector3 velocity;
 
-    //properties
+    // Properties
     public float speed = 1.0f;
-    public float visionDistance = 5;
+    public float visionDistance = 5f;
     public int maxCounter = 5;
     protected int playerCloseCounter;
 
     protected EnemyState state = EnemyState.DEFAULT;
     protected Material material;
 
-    public EnemyBehavior behavior = EnemyBehavior.EnemyBehavior1; 
+    public EnemyBehavior behavior = EnemyBehavior.EnemyBehavior1;
 
     // Start is called before the first frame update
     void Start()
@@ -45,14 +45,13 @@ public class Enemy : MonoBehaviour
     {
         if (mapGenerator.state == MapState.DESTROYED) return;
 
-        // Stop Moving the enemy if the player has reached the goal
+        // Stop moving the enemy if the player has reached the goal or is dead
         if (playerGameObject.GetComponent<Player>().IsGoalReached() || playerGameObject.GetComponent<Player>().IsPlayerDead())
         {
-            //Debug.Log("Enemy stopped since the player has reached the goal or the player is dead");
             return;
         }
 
-        switch(behavior)
+        switch (behavior)
         {
             case EnemyBehavior.EnemyBehavior1:
                 HandleEnemyBehavior1();
@@ -66,17 +65,40 @@ public class Enemy : MonoBehaviour
             default:
                 break;
         }
-
     }
 
     public void Reset()
+{
+    Debug.Log("Enemy reset");
+
+    // Check if pathFinder is initialized
+    if (pathFinder == null)
     {
-        Debug.Log("enemy reset");
-        path.Clear();
-        state = EnemyState.DEFAULT;
-        currentTile = FindWalkableTile();
-        transform.position = currentTile.transform.position;
+        Debug.LogError("pathFinder is not initialized!");
+        return;
     }
+
+    // Check if mapGenerator is assigned
+    if (mapGenerator == null)
+    {
+        Debug.LogError("mapGenerator is not assigned!");
+        return;
+    }
+
+    path.Clear();
+    state = EnemyState.DEFAULT;
+
+    // Check if FindWalkableTile() returns a valid tile
+    currentTile = FindWalkableTile();
+    if (currentTile == null)
+    {
+        Debug.LogError("currentTile is null after calling FindWalkableTile!");
+        return;
+    }
+
+    transform.position = currentTile.transform.position;
+}
+
 
     Tile FindWalkableTile()
     {
@@ -90,16 +112,14 @@ public class Enemy : MonoBehaviour
         return newTarget;
     }
 
-    // Dumb Enemy: Keeps Walking in Random direction, Will not chase player
+    // Dumb Enemy: Keeps walking in a random direction, does not chase player
     private void HandleEnemyBehavior1()
     {
         switch (state)
         {
-            case EnemyState.DEFAULT: // generate random path 
-                
-                //Changed the color to white to differentiate from other enemies
-                material.color = Color.white;
-                
+            case EnemyState.DEFAULT: // Generate random path
+                material.color = Color.white; // Color differentiation for behavior 1
+
                 if (path.Count <= 0) path = pathFinder.RandomPath(currentTile, 20);
 
                 if (path.Count > 0)
@@ -110,33 +130,141 @@ public class Enemy : MonoBehaviour
                 break;
 
             case EnemyState.MOVING:
-                //move
+                // Move toward target
                 velocity = targetTile.gameObject.transform.position - transform.position;
                 transform.position = transform.position + (velocity.normalized * speed) * Time.deltaTime;
-                
-                //if target reached
+
+                // Check if target reached
                 if (Vector3.Distance(transform.position, targetTile.gameObject.transform.position) <= 0.05f)
                 {
                     currentTile = targetTile;
                     state = EnemyState.DEFAULT;
                 }
-
                 break;
+
             default:
                 state = EnemyState.DEFAULT;
                 break;
         }
     }
 
-    // TODO: Enemy chases the player when it is nearby
+    // Enemy chases the player when nearby
     private void HandleEnemyBehavior2()
     {
-        
+        float distanceToPlayer = Vector3.Distance(transform.position, playerGameObject.transform.position);
+
+        switch (state)
+        {
+            case EnemyState.DEFAULT:
+                material.color = Color.red; // Color differentiation for behavior 2
+
+                if (distanceToPlayer <= visionDistance)
+                {
+                    playerCloseCounter = maxCounter;
+                    path = pathFinder.FindPathAStar(currentTile, GetPlayerTile());
+                    if (path.Count > 0)
+                    {
+                        targetTile = path.Dequeue();
+                        state = EnemyState.CHASE;
+                    }
+                }
+                else
+                {
+                    if (path.Count <= 0) path = pathFinder.RandomPath(currentTile, 10);
+                    if (path.Count > 0)
+                    {
+                        targetTile = path.Dequeue();
+                        state = EnemyState.MOVING;
+                    }
+                }
+                break;
+
+            case EnemyState.CHASE:
+                velocity = targetTile.gameObject.transform.position - transform.position;
+                transform.position += velocity.normalized * speed * Time.deltaTime;
+
+                if (Vector3.Distance(transform.position, targetTile.gameObject.transform.position) <= 0.05f)
+                {
+                    currentTile = targetTile;
+
+                    if (path.Count > 0)
+                    {
+                        targetTile = path.Dequeue();
+                    }
+                    else
+                    {
+                        state = EnemyState.DEFAULT;
+                    }
+                }
+                break;
+
+            case EnemyState.MOVING:
+                velocity = targetTile.gameObject.transform.position - transform.position;
+                transform.position += velocity.normalized * speed * Time.deltaTime;
+
+                if (Vector3.Distance(transform.position, targetTile.gameObject.transform.position) <= 0.05f)
+                {
+                    currentTile = targetTile;
+                    state = EnemyState.DEFAULT;
+                }
+                break;
+
+            default:
+                state = EnemyState.DEFAULT;
+                break;
+        }
     }
 
-    // TODO: Third behavior (Describe what it does)
+    // Enemy behavior 3: Patrols or guards an area
     private void HandleEnemyBehavior3()
     {
+        switch (state)
+        {
+            case EnemyState.DEFAULT:
+                material.color = Color.blue; // Color differentiation for behavior 3
 
+                // Define a patrol route or target points
+                if (path.Count <= 0) path = DefinePatrolPath();
+                if (path.Count > 0)
+                {
+                    targetTile = path.Dequeue();
+                    state = EnemyState.MOVING;
+                }
+                break;
+
+            case EnemyState.MOVING:
+                velocity = targetTile.gameObject.transform.position - transform.position;
+                transform.position += velocity.normalized * speed * Time.deltaTime;
+
+                if (Vector3.Distance(transform.position, targetTile.gameObject.transform.position) <= 0.05f)
+                {
+                    currentTile = targetTile;
+                    state = EnemyState.DEFAULT;
+                }
+                break;
+
+            default:
+                state = EnemyState.DEFAULT;
+                break;
+        }
+    }
+
+    private Tile GetPlayerTile()
+    {
+        // Retrieve the tile the player is currently on
+        return mapGenerator.GetTileAtPosition(playerGameObject.transform.position);
+    }
+
+    private Queue<Tile> DefinePatrolPath()
+    {
+        // Define a patrol route or points for behavior 3
+        Queue<Tile> patrolPath = new Queue<Tile>();
+        Tile firstPoint = FindWalkableTile();
+        Tile secondPoint = FindWalkableTile();
+
+        patrolPath.Enqueue(firstPoint);
+        patrolPath.Enqueue(secondPoint);
+
+        return patrolPath;
     }
 }

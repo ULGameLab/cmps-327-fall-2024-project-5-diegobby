@@ -68,126 +68,127 @@ public class Player : MonoBehaviour
     }
 
     private void HandlePlayerFSMStates()
+{
+    switch (state)
     {
-        switch(state)
-        {
-            case PlayerState.DEFAULT: // Find Path to Goal
-                material.color = playerColor;
-                speed = slowSpeed;
+        case PlayerState.DEFAULT:
+            material.color = playerColor;
+            speed = slowSpeed;
 
-                if (path.Count <= 0) path = pathFinder.FindPathAStar(currentTile, mapGenerator.goal);
-                //if there is a path get next step then update target and go to moving state
-                if (path.Count > 0)
-                {
-                    targetTile = path.Dequeue();
-                    state = PlayerState.MOVING;
-                }
-                break;
-            case PlayerState.EVADE: // if possible find path to goal evading enemies otherwise choose next target based on evade behavior
-                speed = fastSpeed;
-                material.color = Color.yellow;
+            if (path.Count <= 0) 
+                path = pathFinder.FindPathAStar(currentTile, mapGenerator.goal);
 
-                if (path.Count <= 0)
-                {
-                    path = pathFinder.FindPathAStarEvadeEnemy(currentTile, mapGenerator.goal);
-                    enemyCloseCounter = 0;
-                }
-
-                if (path.Count > 0) targetTile = path.Dequeue();
-                else targetTile = FindEvadeTile(closestEnemy.gameObject);
+            if (path.Count > 0)
+            {
+                targetTile = path.Dequeue();
                 state = PlayerState.MOVING;
-                break;
-            case PlayerState.MOVING: //move to next target
-                //move
-                velocity = targetTile.transform.position - transform.position;
-                transform.position = transform.position + (velocity.normalized * speed)*Time.deltaTime;
+            }
+            break;
+
+        case PlayerState.EVADE:
+            speed = fastSpeed;
+            material.color = Color.yellow;
+
+            if (path.Count <= 0)
+            {
+                // Pass the closest enemy tiles or enemy list to pathFinder
+                path = pathFinder.FindPathAStarEvadeEnemy(currentTile, mapGenerator.goal, enemyList);
+                enemyCloseCounter = 0;
+            }
+
+            if (path.Count > 0) 
+                targetTile = path.Dequeue();
+            else 
+                targetTile = FindEvadeTile(closestEnemy.gameObject);
                 
-                // Check if player  is dead
-                foreach (Enemy enemy in enemyList)
+            state = PlayerState.MOVING;
+            break;
+
+        case PlayerState.MOVING:
+            velocity = targetTile.transform.position - transform.position;
+            transform.position = transform.position + (velocity.normalized * speed) * Time.deltaTime;
+
+            foreach (Enemy enemy in enemyList)
+            {
+                if (Vector3.Distance(enemy.gameObject.transform.position, transform.position) < 0.5f)
                 {
-                    if (Vector3.Distance(enemy.gameObject.transform.position, transform.position) < 0.5f)
-                    {
-                        state = PlayerState.DEAD;
-                    }
+                    state = PlayerState.DEAD;
+                }
+            }
+
+            if (Vector3.Distance(transform.position, targetTile.transform.position) <= 0.05f)
+            {
+                currentTile = targetTile;
+                enemyCloseCounter--;
+
+                if (currentTile == mapGenerator.goal)
+                {
+                    state = PlayerState.GOAL_REACHED;
+                    break;
                 }
 
-                //if target tile is reached
-                if (Vector3.Distance(transform.position, targetTile.transform.position) <= 0.05f)
+                if (enemyCloseCounter <= 0)
                 {
-                    //update current tile
-                    currentTile = targetTile;
-                    //decrease counter
-                    enemyCloseCounter--;
-
-                    //if it goal change state to GOAL_REACHED
-                    if (currentTile == mapGenerator.goal)
+                    foreach (Enemy enemy in enemyList)
                     {
-                        state = PlayerState.GOAL_REACHED;
-                        break;
-                    }
-
-                    //if counter is less than zero, check for close enemies
-                    if (enemyCloseCounter <= 0)
-                    {
-                        foreach (Enemy enemy in enemyList)
+                        if (Vector3.Distance(enemy.gameObject.transform.position, transform.position) < visionDistance)
                         {
-                            if (Vector3.Distance(enemy.gameObject.transform.position, transform.position) < visionDistance)
-                            {
-                                closestEnemy = enemy;
-                                path.Clear();
-                                //if an enemy is close reset counter
-                                enemyCloseCounter = maxCounter;
-                                break;
-
-                            }
+                            closestEnemy = enemy;
+                            path.Clear();
+                            enemyCloseCounter = maxCounter;
+                            break;
                         }
                     }
-                    //if counter is over 0, got to evade
-                    if (enemyCloseCounter > 0) state = PlayerState.EVADE;
-                    else state = PlayerState.DEFAULT;
                 }
-                break;
-            case PlayerState.GOAL_REACHED:
-                material.color = playerColor;
-                break;
-            case PlayerState.DEAD:
-                Debug.Log("Player Dead");
-                transform.gameObject.GetComponent<Renderer>().enabled = false;
-                StartExplosion();
-                break;
-            default:
-                state = PlayerState.DEFAULT;
-                break;
-        }
+                if (enemyCloseCounter > 0) 
+                    state = PlayerState.EVADE;
+                else 
+                    state = PlayerState.DEFAULT;
+            }
+            break;
+
+        case PlayerState.GOAL_REACHED:
+            material.color = playerColor;
+            break;
+
+        case PlayerState.DEAD:
+            Debug.Log("Player Dead");
+            transform.gameObject.GetComponent<Renderer>().enabled = false;
+            StartExplosion();
+            break;
+
+        default:
+            state = PlayerState.DEFAULT;
+            break;
     }
+}
+
 
     // Find a tile to evade from an incomming enemy
     // Lookahead time is a fixed value but could be estimated as well
     private Tile FindEvadeTile(GameObject enemy)
+{
+    Tile nextTile = null;
+
+    Vector3 targetVelocity = enemy.GetComponent<Enemy>().velocity;
+    float lookaheadTime = 100;
+    Vector3 targetPredictedPosition = enemy.transform.position + targetVelocity * lookaheadTime;
+
+    double maxAngle = 0;
+    foreach (Tile adjacent in currentTile.Adjacents)
     {
-        Tile nextTile = null;
-        //Debug.Log("Finding Evade Tile");
-
-        //Predict target location
-        Vector3 targetVelocity = enemy.GetComponent<Enemy>().velocity;
-        float lookaheadTime = 100;
-        Vector3 targetPredictedPosition = enemy.transform.position + targetVelocity * lookaheadTime;
-
-        //Evade from the target: FInd tile in opposite direction
-        double maxangle = 0;
-        foreach(Tile adjacent in currentTile.Adjacents)
+        Vector3 adjacentDirection = adjacent.transform.position - transform.position;
+        Vector3 targetDirection = targetPredictedPosition - transform.position;
+        double angle = Mathf.Acos(Vector3.Dot(adjacentDirection.normalized, targetDirection.normalized));
+        if (angle > maxAngle)
         {
-            Vector3 adjacentDirection = adjacent.transform.position - transform.position;
-            Vector3 targetDirection = targetPredictedPosition - transform.position;
-            double angle = Mathf.Acos(Vector3.Dot(adjacentDirection.normalized,targetDirection.normalized));
-            if(angle > maxangle)
-            {
-                nextTile = adjacent;
-                maxangle = angle;
-            }
+            nextTile = adjacent;
+            maxAngle = angle;
         }
-        return nextTile;
     }
+    return nextTile;
+}
+
 
     private void StartExplosion()
     {
